@@ -1,7 +1,15 @@
+### This functon checks if the package is present, if it's not then it gets installed
+checkAndRequire = function(pkgName) {
+  if (!require(pkgName, character.only = TRUE)) {
+    install.packages(pkgName, dependencies = TRUE, repos = 'http://cran.rstudio.com/')
+  }
+  ### Importing the package
+  require(pkgName, character.only = TRUE)
+}
 ### USEFUL PACKAGES ###
-library(ape)
-library(expm)
-library(igraph)
+checkAndRequire("ape")
+checkAndRequire("expm")
+checkAndRequire("igraph")
 ### USEFUL CONSTANTS ###
 ALPHABET = c("a","c","g","t")
 MISSING = -2  # code for missing K-mers
@@ -13,17 +21,18 @@ LOCAL <<- 1   # number of local alignments used
 ### CODE OPTIONS ###
 MMF = 0.5     # maximum missing fraction for a path
 THRESH = 0.05 # minimum pairwise distance
-K = 15        # length of the K-mer to use for the library
+K = 25        # length of the K-mer to use for the library
 SPLIT = TRUE  # TRUE if reads become non-overlapping K-mers
 GRAPH = TRUE  # TRUE if using de Bruijn graphs to preprocess
 UNIQ = TRUE   # TRUE if only unique K-mers from library used
 HIDDEN = TRUE # TRUE if reference strains are hidden, one at a time
 NDEC = 1      # number of decimals; used for rounding
 NEW = TRUE    # TRUE if the new mixtures are being used
+CORRECT=FALSE # TRUE if read pairing needs to be corrected
 
 ### This function is a wrapper function for all the relevant files found in the directory.
 fullWrapper = function(databaseFile="../DatasetW1.nex.txt", maxFrac, threshold, K, split, graph, unique, hidden) {
-	myAlign = parseNex(databaseFile)
+  myAlign = parseNex(databaseFile)
 	prunedTypes = pruneTypes(myAlign, threshold = threshold)
 	redAlign = prunedTypes[[1]]
 	clusterMap = prunedTypes[[2]]
@@ -36,10 +45,10 @@ fullWrapper = function(databaseFile="../DatasetW1.nex.txt", maxFrac, threshold, 
 	Output = vector("list", length(allFiles))
 	names(Output) = allFiles
 	for (curFile in allFiles) {
-		print(curFile)
+	  print(curFile)
 	  Output[[curFile]] = wrapperKnownNew(curFile, redAlign, K, graph, unique, split, hidden, maxFrac, clusterMap)
 	}
-	curDir = tail(unlist(strsplit(getwd(), "/")),1)
+	curDir = tail(unlist(strsplit(getwd(), "/")), 1)
 	save(Output, file = paste0(curDir, "FullOutput", ifelse(hidden, "Hidden", "Known"), "K", K, ".RData"))
 	opts1 = paste0("ResultsFrac", maxFrac, "Threshold", threshold, "K", K) 
 	opts2 = paste0(rep("Split", split), rep("Graph", graph), rep("Unique", unique), rep("Hidden", hidden))
@@ -59,7 +68,6 @@ formatOutput = function(output, outputFile, clusterMap = NULL, hidden = HIDDEN, 
 	}
 	Table = matrix(NA, nrow = 0, ncol = 4, dimnames = DimNames)
 	for (ind in 1:N) {
-	  print(ind)
 	  curMat = processSingleResult(output[[ind]], clusterMap, hidden, nDec)
 		Table = rbind(Table, curMat)
 	}
@@ -154,12 +162,12 @@ processAllReads = function(F1, F2, goodStrains, redAlign, N, unique, split, Name
   if (!is.null(Name)) {
     curStrains = setdiff(goodStrains, Name)
     curQ = getUniqueKmers(redAlign[curStrains, , drop = FALSE], N)
-    curResult = mapPairedReadsNew(F1, F2, curQ, unique, split, hidden = Name, verbose = FALSE, cMap = cMap)
+    curResult = mapPairedReadsNew(F1, F2, curQ, unique = unique, split = split, hidden = Name, cMap = cMap)
   }
   else {
     if (length(goodStrains) > 1) {
       Qred = getUniqueKmers(redAlign[goodStrains, , drop = FALSE], N)
-      curResult = mapPairedReadsNew(F1, F2, Qred, unique = unique, split = split, hidden = NULL, cMap = cMap)[[2]]
+      curResult = mapPairedReadsNew(F1, F2, Qred, unique = unique, split = split, hidden = NULL, cMap = cMap)
     }
     else {
       curResult = 1
@@ -170,10 +178,9 @@ processAllReads = function(F1, F2, goodStrains, redAlign, N, unique, split, Name
 }
 
 ### This function writes the specified subset of unmapped reads using baseFilename, Name, K, ind in the filename 
-writeUnmappedReads = function(PF, unmappedReads, baseFilename, Name, ind, K) {
+writeUnmappedReads = function(PF, unmappedReads, Filename) {
   Reads  = PF[[1]][unmappedReads, , drop = FALSE]
   Scores = PF[[2]][unmappedReads]
-  Filename = paste0(baseFilename, "Hidden", Name, "K", K, ".R", ind, ".fq")
   writeF(Reads, Scores, Filename)
   return()
 }
@@ -187,16 +194,41 @@ completeFilename = function(filename, completion) {
   filename
 }
 
+### This function finds the longest common prefix of two strings
+longestCommonPrefix = function(string1, string2, removeDirs = TRUE) {
+  Str1 = unlist(strsplit(string1, ""))
+  Str2 = unlist(strsplit(string2, ""))
+  L = min(length(Str1), length(Str2))
+  maxPos = min(which(Str1[1:L] != Str2[1:L])) - 1
+  Str = Str1[1:min(L, maxPos)]
+  string = paste0(Str, collapse = "")
+  if (removeDirs) {
+    string = tail(unlist(strsplit(string, "/")), 1)
+  }
+  string
+}
+
 ### This function is a new wrapper function that takes reverse complementarity of paired-end reads into account.
-wrapperKnownNew = function(baseFilename, redAlign, N, graph, unique, split, hidden, maxFrac, cMap = NULL) {
-  correctFractions = parseFilenameFracs(baseFilename)
-  File1 = completeFilename(paste0(baseFilename, "R1.fq"), ".txt")
-  File2 = completeFilename(paste0(baseFilename, "R2.fq"), ".txt")
-  PF1 = parseF(File1, keepNames = TRUE, keepScores = hidden)
-  PF2 = parseF(File2, keepNames = TRUE, keepScores = hidden)
+wrapperKnownNew = function(baseFilename, redAlign, N, graph, unique, split, hidden, maxFrac, cMap = NULL, outDir = NULL) {
+  if (length(baseFilename) == 2) {
+    File1 = baseFilename[1]
+    File2 = baseFilename[2]
+    correctFractions = NULL
+    baseFilename = longestCommonPrefix(File1, File2, removeDirs = TRUE)
+    DOUBLE = TRUE
+  } 
+  else {
+    File1 = completeFilename(paste0(baseFilename, "R1.fq"), ".txt")
+    File2 = completeFilename(paste0(baseFilename, "R2.fq"), ".txt")
+    correctFractions = parseFilenameFracs(baseFilename)
+    DOUBLE = FALSE
+  }
+  PF1 = parseF(File1, keepNames = TRUE, keepScores = (hidden || DOUBLE))
+  PF2 = parseF(File2, keepNames = TRUE, keepScores = (hidden || DOUBLE))
   goodStrains = rownames(redAlign)
   if (graph) {
     goodStrains = getGoodStrainsGraph(PF1[[1]], PF2[[1]], redAlign, N, maxFrac)
+    if (is.null(goodStrains)) {stop("Error: this should never happen!")}
   }
   if (hidden) {
     trueNames = mapEntities(names(correctFractions), cMap)
@@ -204,12 +236,27 @@ wrapperKnownNew = function(baseFilename, redAlign, N, graph, unique, split, hidd
     for (Name in trueNames) {
       curResult = processAllReads(PF1[[1]], PF2[[1]], goodStrains, redAlign, N, unique, split, Name, cMap = cMap)
       estimatedFractions[,Name] = unlist(curResult[[3]])
-      writeUnmappedReads(PF1, curResult[[4]], baseFilename, Name, 1, N)
-      writeUnmappedReads(PF2, curResult[[4]], baseFilename, Name, 2, N)
+      Filename1 = paste0(baseFilename, "Hidden", Name, "K", N, ".R", 1, ".fq")
+      Filename2 = paste0(baseFilename, "Hidden", Name, "K", N, ".R", 2, ".fq")
+      writeUnmappedReads(PF1, curResult[[4]], Filename1)
+      writeUnmappedReads(PF2, curResult[[4]], Filename2)
     }
   }
   else {
-    estimatedFractions = processAllReads(PF1[[1]], PF2[[1]], goodStrains, redAlign, N, unique, split, Name=NULL)
+    curResult = processAllReads(PF1[[1]], PF2[[1]], goodStrains, redAlign, N, unique, split, Name = NULL, cMap = cMap)
+    estimatedFractions = curResult[[2]]
+    if (DOUBLE) {
+      if (!is.null(outDir)) {
+        if (!dir.exists(outDir)) {
+          dir.create(outDir)
+        }
+        outDir = ifelse(substr(outDir, nchar(outDir), nchar(outDir)) == "/", outDir, paste0(outDir, "/"))
+      }
+      Filename1 = paste0(outDir, "LeftOver", baseFilename, 1, ".fq")
+      Filename2 = paste0(outDir, "LeftOver", baseFilename, 2, ".fq")
+      writeUnmappedReads(PF1, curResult[[4]], Filename1)
+      writeUnmappedReads(PF2, curResult[[4]], Filename2)
+    }
   }
   output = list(correctFractions, estimatedFractions)
   output
@@ -266,6 +313,7 @@ constructDBGraph = function(Table, K) {
 ### If more than maxMissingFrac of the K-mers are absent, the return value is NULL; 
 ### otherwise, the K-mers are labelled, and if count = TRUE, they are also counted.
 identifyPath = function(sequence, Graph, Map, maxMissingFrac, count) {
+  K = nchar(V(Graph)$name[1])
 	curKmers = getKmers(sequence, K, requireUnique = FALSE)
 	numKmers = length(curKmers)
 	mappedKmers = Map[curKmers]
@@ -348,7 +396,6 @@ mapAmbiguousRead = function(read1, read2, Kmers, mult1, mult2, mult1R, mult2R, m
   bestScore = min(scores, na.rm = TRUE)
   bestPos = which(scores == bestScore)
   if (length(bestPos) != 1) {
-    print("Warning: could not resolve ambiguous read!")
     return(NA)
   }
   return(bestPos)
@@ -414,7 +461,6 @@ getAnchoredScores = function(read, anchors, Kmers, unique) {
 }
 
 localAlignment = function(sequence1, sequence2, match, mismatch, insertion, deletion) {
-  print(paste("Entering local alignment for iteration", LOCAL))
   LOCAL <<- LOCAL + 1
   L1 = length(sequence1)
   L2 = length(sequence2)
@@ -482,8 +528,10 @@ HammingDistance = function(string, charVector, trim) {
 computePerformance = function(readNames, Mapped, hidden = NULL, cMap = NULL) {
   Mapped = mapEntities(Mapped, cMap)
   trueStrains = extractStrains(readNames)
+  trueStrains = mapEntities(trueStrains, cMap)
   Unmapped = which(is.na(Mapped))
   if (!is.null(hidden)) {
+    hidden = mapEntities(hidden, cMap)
     goodFinds = sum(trueStrains[Unmapped] == hidden)
     Precision = goodFinds/length(Unmapped)
     Recall = goodFinds/sum(trueStrains == hidden)
@@ -505,7 +553,7 @@ computePerformance = function(readNames, Mapped, hidden = NULL, cMap = NULL) {
 ### This function maps files of paired-end reads, taking reverse complementation of read pairs into account
 ### If hidden is not NULL, this corresponds to the name of the hidden strain (and we use read names to compare)
 ### If verbose is TRUE, then the precision and recall of the mapping are also printed out.
-mapPairedReadsNew = function(F1, F2, Kmers, unique, split, hidden = NULL, verbose = TRUE, cMap = NULL) {
+mapPairedReadsNew = function(F1, F2, Kmers, unique, split, hidden = NULL, verbose = FALSE, cMap = NULL) {
   L = nrow(F1)
   R = ncol(F1)
   stopifnot(L == nrow(F2))
@@ -517,15 +565,14 @@ mapPairedReadsNew = function(F1, F2, Kmers, unique, split, hidden = NULL, verbos
   print(paste0("A total of ", round(fracMapped * 100, NDEC), "% of the reads got mapped"))
   Fracs = table(na.omit(Mapped))/length(na.omit(Mapped))
   output = list(fracMapped, Fracs)
+  Performance = NULL
   if (!is.null(hidden) || verbose) {
     Performance = computePerformance(rownames(F1), Mapped, hidden = hidden, cMap = cMap)
     if (verbose) {
-      print(Performance)
-    }
-    else {
-      output = c(output, list(Performance, which(is.na(Mapped))))
+      print(Performance) 
     }
   }
+  output = c(output, list(Performance, which(is.na(Mapped))))
   output
 }
 
@@ -573,7 +620,6 @@ pruneTypes = function(alignment, threshold) {
 	L = length(classes)
 	clustersFound = vector("list", L)
 	names(clustersFound) = classes
-	print(paste("There are", L, "clusters in the data"))
 	for (class in classes) {
 		curClass = which(C$membership == class)
 		curSubgraph = induced_subgraph(G, curClass)
@@ -734,6 +780,43 @@ testFractions = function(filename, returnFracs = FALSE) {
   output
 }
 
+### This function checks if the reads are properly paired; if not, overwrites File2 by a corrected version
+correctReadPairing = function(File1, File2) {
+  PF1 = parseF(File1, keepNames = TRUE, keepScores = TRUE)
+  PF2 = parseF(File2, keepNames = TRUE, keepScores = TRUE)
+  Names1 = rownames(PF1[[1]])
+  Names2 = rownames(PF2[[1]])
+  stopifnot(length(Names1) == length(Names2))
+  shortNames1 = gsub("/1", "", Names1)
+  shortNames2 = gsub("/2", "", Names2)
+  stopifnot(all(sort(shortNames1) == sort(shortNames2)))
+  if (any(shortNames1 != shortNames2)) {
+    print(paste("Correcting the order in", File2, "relative to", File1))
+    order = match(shortNames1, shortNames2)
+    writeUnmappedReads(PF2, order, File2)
+  }
+  else {
+    print(paste("The files", File1, "and", File2, "are consistently paired; no changes made!"))
+  }
+}
+
+### This function preprocesses a directory to consistently order all the paired-end read files
+preprocessDirectory = function(Directory) {
+  initDir = getwd()
+  setwd(Directory)
+  allFiles = list.files(pattern = ".fq")
+  allFiles = gsub("R1.fq", "", allFiles)
+  allFiles = gsub("R2.fq", "", allFiles)
+  allFiles = unique(allFiles)
+  allFiles = allFiles[grep("Hidden", allFiles, invert = TRUE)]
+  for (File in allFiles) {
+    File1 = paste0(File, "R1.fq")
+    File2 = paste0(File, "R2.fq")
+    correctReadPairing(File1, File2)
+  }
+  setwd(initDir)
+}
+
 ### This function computes the difference between stated and actual strain fractions for all files in a directory
 testAllFractions = function(directory) {
   initDir = getwd()
@@ -749,20 +832,29 @@ testAllFractions = function(directory) {
   allDiffs
 }
 
-### What we are actually executing
-allDirs = as.vector(outer(c("AB mixtures", "Complex mixtures"), c("", " error-free"), paste0))
-if (NEW) {
-  setwd("Accurate mixtures/")
-}
-for (HIDDEN in c(TRUE)) { 
-  for (K in c(15, 18, 25)) {
-    if (!(HIDDEN || NEW)) {
-      allDirs = c("Individual Strains", allDirs)
+### This function describes what we are actually executing
+main = function() {
+  allDirs = as.vector(outer(c("AB mixtures", "Complex mixtures"), c("", " error-free"), paste0))
+  if (CORRECT) {
+    for (directory in allDirs[c(2,4)]) {
+      preprocessDirectory(directory)
     }
-    for (directory in allDirs) {
-      setwd(directory)
-      Res = fullWrapper(maxFrac = MMF, threshold = THRESH, K = K, split = SPLIT, graph = GRAPH, unique = UNIQ, hidden = HIDDEN)
-      setwd("..")
+  }
+  if (NEW) {
+    setwd("Accurate mixtures/")
+  }
+  for (HIDDEN in c(FALSE, TRUE)) {
+    for (K in c(15, 18, 25)) {
+      print(c(HIDDEN, K))
+      if (!(HIDDEN || NEW)) {
+        allDirs = c("Individual Strains", allDirs)
+      }
+      for (directory in allDirs) {
+        setwd(directory)
+        print(directory)
+        Res = fullWrapper(maxFrac = MMF, threshold = THRESH, K = K, split = SPLIT, graph = GRAPH, unique = UNIQ, hidden = HIDDEN)
+        setwd("..")
+      }
     }
   }
 }
