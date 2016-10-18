@@ -165,14 +165,8 @@ processAllReads = function(F1, F2, goodStrains, redAlign, N, unique, split, Name
     curResult = mapPairedReadsNew(F1, F2, curQ, unique = unique, split = split, hidden = Name, cMap = cMap)
   }
   else {
-    if (length(goodStrains) > 1) {
-      Qred = getUniqueKmers(redAlign[goodStrains, , drop = FALSE], N)
-      curResult = mapPairedReadsNew(F1, F2, Qred, unique = unique, split = split, hidden = NULL, cMap = cMap)
-    }
-    else {
-      curResult = 1
-      names(curResult) = goodStrains[1]
-    }   
+    Qred = getUniqueKmers(redAlign[goodStrains, , drop = FALSE], N)
+    curResult = mapPairedReadsNew(F1, F2, Qred, unique = unique, split = split, hidden = NULL, cMap = cMap)
   }
   curResult
 }
