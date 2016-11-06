@@ -697,8 +697,9 @@ parseF = function(fastqFile, keepNames = FALSE, keepScores = FALSE) {
 	Reads = Lines[4 * (1:(N/4)) - 2]
 	stopifnot(all(nchar(Reads) == nchar(Reads[1])))
 	if (keepNames) {
-		ReadIDs = Lines[4 * (1:(N/4)) - 3]
-		shortIDs = unlist(lapply(ReadIDs, function(x) {tail(unlist(strsplit(x,":")),1)}))
+		# ReadIDs = Lines[4 * (1:(N/4)) - 3]
+		# shortIDs = unlist(lapply(ReadIDs, function(x) {tail(unlist(strsplit(x,":")),1)}))
+		shortIDs = Lines[4 * (1:(N/4)) - 3]
 	}
 	Reads = lapply(Reads, function(x) {unlist(strsplit(tolower(x),""))})
 	Reads = matrix(unlist(Reads), N/4, byrow = TRUE)
@@ -782,7 +783,9 @@ correctReadPairing = function(File1, File2) {
   Names2 = rownames(PF2[[1]])
   stopifnot(length(Names1) == length(Names2))
   shortNames1 = gsub("/1", "", Names1)
+  shortNames1 = gsub("\\.1 ", " ", Names1)
   shortNames2 = gsub("/2", "", Names2)
+  shortNames2 = gsub("\\.2 ", " ", Names2)
   stopifnot(all(sort(shortNames1) == sort(shortNames2)))
   if (any(shortNames1 != shortNames2)) {
     print(paste("Correcting the order in", File2, "relative to", File1))
