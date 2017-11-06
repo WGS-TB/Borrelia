@@ -8,7 +8,7 @@
 
 # Inputs
 
-1) For every sample i, we assign a folder S_i which consists pair end reads as two seprate FASTQ files. All Folders S_i's are stored in a main folder M.  
+1) For every sample i, we assign a folder S_i which consists two seprate FASTQ files which are pair-end reads. All Folders S_i's are stored in a main folder M.  
 
 2) All sequences of the reference alleles as a nexus file.
 
